@@ -1136,11 +1136,8 @@ public function ajax_bulk_import_costs(): void {
 			// 3. Tablo için satır CSS sınıfını belirle
 			$comm_class      = $is_default_comm ? 'default-comm-row' : '';
 			$row_class_final = esc_attr( trim($row_class . ' ' . $calc_class . ' ' . $comm_class) );
-
-			// Sabit Gider Hesabı
-			$store_fc = isset($fixed_costs_opt[$order->store_id]) ? $fixed_costs_opt[$order->store_id] : array();
-			$order_fc = (float)($store_fc['personnel'] ?? 0) + (float)($store_fc['packaging'] ?? 0) + (float)($store_fc['other'] ?? 0);
-			$display_fc = (int) $order->is_calculated ? $order_fc : 0.00;
+// Sabit Gider Hesabı (Canlı hesaplamak yerine veritabanındaki kesin hesabı kullan)
+			$display_fc = (float) $order->total_other_exp;
 
 			// Marj Renkleri
 			$margin_val = (float) $order->profit_margin;

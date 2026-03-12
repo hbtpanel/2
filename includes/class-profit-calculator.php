@@ -437,32 +437,32 @@ class HBT_Profit_Calculator {
             $args[] = $store_id;
         }
 
-        // 3. SUNUCU ÇÖKMESİNİ (500) ENGELLEYEN LİMİT VE PAKETLEME
-        // Eğer 5000 siparişiniz varsa ve LIMIT koymazsak PHP %100 RAM'den patlar.
-        // Bu yüzden güvenli sınır olarak tek seferde maksimum 500 sipariş hesaplatıyoruz.
-        $sql = "SELECT id FROM {$wpdb->prefix}hbt_orders WHERE {$where} ORDER BY id ASC LIMIT 500";
-
-        if ( $args ) {
-            // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
-            $ids = $wpdb->get_col( $wpdb->prepare( $sql, ...$args ) );
-        } else {
-            // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
-            $ids = $wpdb->get_col( $sql );
-        }
-
-        if ( empty( $ids ) ) {
-            return; // Hesaplanacak sipariş kalmadıysa işlemi güvenle bitir
-        }
-
+      // 3. SUNUCU ÇÖKMESİNİ (500) ENGELLEYEN LİMİT VE DÖNGÜ (YENİ SİSTEM)
         // RAM Şişmesini Önlemek için Cache'i geçici durdur
         wp_suspend_cache_addition( true );
 
-        foreach ( $ids as $id ) {
-            $this->calculate_order( (int) $id );
+        // 500'erli paketler halinde TÜM siparişler bitene kadar otomatik döngüye sok
+        while ( true ) {
+            $sql = "SELECT id FROM {$wpdb->prefix}hbt_orders WHERE {$where} ORDER BY id ASC LIMIT 500";
             
-            // Veritabanı şişmesini ve bellek dolmasını (Memory Leak) engelle
-            if ( function_exists( 'wp_cache_flush' ) ) {
-                wp_cache_flush();
+            if ( $args ) {
+                $ids = $wpdb->get_col( $wpdb->prepare( $sql, ...$args ) );
+            } else {
+                $ids = $wpdb->get_col( $sql );
+            }
+
+            // Eğer veritabanında is_calculated = 0 olan (hesaplanmamış) sipariş kalmadıysa döngüyü tamamen kır
+            if ( empty( $ids ) ) {
+                break; 
+            }
+
+            foreach ( $ids as $id ) {
+                $this->calculate_order( (int) $id );
+                
+                // Bellek dolmasını (Memory Leak) engelle
+                if ( function_exists( 'wp_cache_flush' ) ) {
+                    wp_cache_flush();
+                }
             }
         }
 

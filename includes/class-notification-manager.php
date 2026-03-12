@@ -227,11 +227,8 @@ class HBT_Notification_Manager {
 	 * @return bool
 	 */
 	public function create_notification( string $type, string $title, string $message, int $reference_id = 0 ): bool {
-		return $this->db->add_notification( array(
-			'notification_type' => $type,
-			'title'             => $title,
-			'message'           => $message,
-			'reference_id'      => $reference_id,
-		) );
+		// Hatalı 'add_notification' yerine doğru 'create_notification' metodu çağrıldı.
+		$result = $this->db->create_notification( $type, $title, $message, $reference_id );
+		return $result !== false;
 	}
 }
