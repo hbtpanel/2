@@ -38,6 +38,9 @@ class HBT_Admin_Menu {
 		add_action( 'wp_ajax_hbt_export_orders', array( $this, 'ajax_export_orders' ) );
 		add_action( 'wp_ajax_hbt_save_profit_goal', array( $this, 'ajax_save_profit_goal' ) );
 		add_action( 'wp_ajax_hbt_save_settings', array( $this, 'ajax_save_settings' ) );
+		add_action( 'admin_head', array( $this, 'add_ios_pwa_tags' ) );
+		// PWA Uygulaması için WP oturumunu 1 yıl boyunca açık tut
+		add_filter( 'auth_cookie_expiration', function() { return 31556926; } );
 
 		// AJAX handlers.
 		add_action( 'wp_ajax_hbt_test_connection', array( $this, 'ajax_test_connection' ) );
@@ -1258,4 +1261,21 @@ public function ajax_bulk_import_costs(): void {
 			wp_send_json_error( array( 'message' => __( 'Ayarlar kaydedilemedi.', 'hbt-trendyol-profit-tracker' ) ) );
 		}
 	}
+
+	/**
+ * iOS cihazlar için PWA (Tam Ekran Uygulama) etiketlerini ekler.
+ */
+public function add_ios_pwa_tags(): void {
+    // Bu etiketleri sadece bizim eklentinin sayfalarındaysak yükle
+    $screen = get_current_screen();
+    if ( ! $screen || strpos( $screen->id, 'hbt-tpt' ) === false ) {
+        return;
+    }
+    ?>
+    <meta name="apple-mobile-web-app-title" content="Kâr Takip">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    
+    <?php
+}
 }

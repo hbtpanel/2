@@ -444,3 +444,61 @@ td.bg-blink-green { background-color: #059669 !important; color: #ffffff !import
 	.hbt-page-header, .hbt-tabs, .hbt-modal, .hbt-btn, #adminmenuwrap, #wpadminbar { display: none !important; }
 	.hbt-wrap { max-width: 100%; margin: 0; padding: 0; background: #fff;}
 }
+
+/* MOBİL UYGULAMA GÖRÜNÜMÜ - DÜZELTİLMİŞ VERSİYON */
+@media screen and (max-width: 782px) {
+
+	/* DİĞER TÜM WP MENÜLERİNİ GİZLE, SADECE KÂR TAKİP KALSIN */
+    #adminmenu li.menu-top:not(.toplevel_page_hbt-tpt-dashboard) { 
+        display: none !important; 
+    }
+    /* SADECE gereksiz WP ikonlarını (logo, güncellemeler, yorumlar vb.) gizle. Menü butonu kalsın! */
+    #wp-admin-bar-wp-logo, 
+    #wp-admin-bar-updates, 
+    #wp-admin-bar-comments, 
+    #wp-admin-bar-new-content,
+    #wp-admin-bar-my-account {
+        display: none !important;
+    }
+
+    /* Üst menü çubuğunu uygulamanın başlığı (Header) gibi şık yapalım */
+    #wpadminbar {
+        background-color: #f27a1a !important; /* Trendyol Turuncusu. İsterseniz siyah için #1d2327 yapabilirsiniz */
+        position: fixed !important;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    /* Menü açma ikonunu (Hamburger) beyaz ve daha belirgin yapalım */
+    #wpadminbar #wp-admin-bar-menu-toggle a {
+        color: #ffffff !important;
+    }
+
+    /* Sol menü açıldığında, diğer alakasız eklentilerin menülerini gizleyip SADECE Kâr Takip menüsünü görmek isterseniz aşağıdaki satırın başındaki ve sonundaki /* işaretlerini silin */
+    /* #adminmenu li.menu-top:not(.toplevel_page_hbt-tpt-dashboard) { display: none !important; } */
+
+    /* Alt kısımdaki WP versiyon yazılarını gizle */
+    #wpfooter {
+        display: none !important;
+    }
+	/* TABLOLARIN MOBİLDE İÇ İÇE GİRMESİNİ ENGELLE VE YATAY SCROLL EKLE */
+    .dataTables_wrapper {
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important; /* iPhone'da kaydırmanın yağ gibi akmasını sağlar */
+        width: 100% !important;
+        padding-bottom: 15px; 
+    }
+
+    /* Tablonun ekrana sığmaya çalışmasını yasakla, içeriğine göre genişlemesini sağla */
+    table.dataTable {
+        width: max-content !important; /* En kritik kod: Tabloyu içeriği kadar genişletir */
+        max-width: none !important; /* Sınırları kaldırır */
+        table-layout: auto !important;
+    }
+
+    /* Hücre metinlerinin alt satıra inmesini engelle ve aralarını ferahlat */
+    table.dataTable th, 
+    table.dataTable td {
+        white-space: nowrap !important;
+        padding: 12px 18px !important; /* İç içe girmemesi için sağdan soldan boşlukları artırdık */
+    }
+}
