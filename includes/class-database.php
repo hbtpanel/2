@@ -98,12 +98,16 @@ class HBT_Database {
 			$this->get_notifications_schema( $prefix, $charset_collate ),
 			$this->get_ad_expenses_schema( $prefix, $charset_collate ),
 			$this->get_sync_logs_schema( $prefix, $charset_collate ),
+			$this->get_queue_schema( $prefix, $charset_collate ),
 		);
 
 		foreach ( $tables as $sql ) {
 			dbDelta( $sql );
 		}
+		$this->wpdb->query( $this->get_queue_schema( $prefix, $charset_collate ) );
 	}
+
+	
 
 	/** @return string */
 	private function get_stores_schema( string $prefix, string $charset_collate ): string {
@@ -1662,6 +1666,24 @@ class HBT_Database {
 		) $charset_collate;";
 	}
 
+	/** @return string */
+	private function get_queue_schema( string $prefix, string $charset_collate ): string {
+		return "CREATE TABLE IF NOT EXISTS {$prefix}hbt_queue (
+			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			store_id BIGINT UNSIGNED NOT NULL,
+			task_type VARCHAR(50) NOT NULL,
+			payload LONGTEXT NOT NULL,
+			status VARCHAR(20) DEFAULT 'pending' NOT NULL,
+			attempts TINYINT UNSIGNED DEFAULT 0 NOT NULL,
+			error_log TEXT,
+			created_at DATETIME DEFAULT '0000-00-00 00:00:00' NOT NULL,
+			updated_at DATETIME DEFAULT '0000-00-00 00:00:00' NOT NULL,
+			PRIMARY KEY  (id),
+			KEY idx_status_created (status, created_at),
+			KEY idx_store (store_id)
+		) $charset_collate;";
+	}
+
 	/**
 	 * Insert a sync log and keep only the latest 100 logs.
 	 *
@@ -1711,5 +1733,128 @@ class HBT_Database {
 	 */
 	public function get_total_sync_logs_count(): int {
 		return (int) $this->wpdb->get_var( "SELECT COUNT(id) FROM {$this->wpdb->prefix}hbt_sync_logs" );
+	}
+
+	// -------------------------------------------------------------------------
+	// Background Queue (Arka Plan Kuyruğu) Operasyonları
+	// -------------------------------------------------------------------------
+
+	/**
+	 * Kuyruğa yeni bir iş (task) ekler. (GÜVENLİ VERSİYON)
+	 */
+	public function enqueue_task( $store_id, string $task_type, array $payload ) {
+		$table = $this->wpdb->prefix . 'hbt_queue';
+		$data = array(
+			'store_id'   => (int) $store_id,
+			'task_type'  => $task_type,
+			'payload'    => wp_json_encode( $payload ),
+			'status'     => 'pending',
+			'created_at' => current_time( 'mysql' ),
+			'updated_at' => current_time( 'mysql' ),
+		);
+        
+		// WordPress'e hangi verinin Sayı (%d), hangisinin Metin (%s) olduğunu kesin olarak söylüyoruz.
+		$format = array( '%d', '%s', '%s', '%s', '%s', '%s' );
+		
+		$inserted = $this->wpdb->insert( $table, $data, $format );
+		
+		if ( false === $inserted ) {
+			// Eğer veritabanı yine de reddederse, sebebi PHP loglarına yazdır.
+			error_log( 'HBT Queue Insert Error: ' . $this->wpdb->last_error );
+		}
+		
+		return $this->wpdb->insert_id ?: false;
+	}
+
+	/**
+	 * Bekleyen ilk işi getirir ve "işleniyor" (processing) durumuna çeker.
+	 * Race condition (çakışma) önlemi içerir.
+	 */
+	public function get_next_task(): ?object {
+		$table = $this->wpdb->prefix . 'hbt_queue';
+		
+		// Sadece pending olan veya processing olup 1 saattir takılı kalanları (zombi görevler) al
+		$task = $this->wpdb->get_row( "
+			SELECT * FROM {$table} 
+			WHERE status = 'pending' 
+			   OR (status = 'processing' AND updated_at < DATE_SUB(NOW(), INTERVAL 1 HOUR))
+			ORDER BY created_at ASC 
+			LIMIT 1
+		" );
+
+		if ( $task ) {
+			// Race condition'ı önlemek için hemen durumu processing'e çek!
+			// Eğer sorgu 0 satır etkilediyse, başka bir süreç (worker) bizden önce bu görevi almıştır.
+			$updated = $this->wpdb->query( $this->wpdb->prepare( "
+				UPDATE {$table} 
+				SET status = 'processing', updated_at = %s 
+				WHERE id = %d AND status = %s
+			", current_time( 'mysql' ), $task->id, $task->status ) );
+
+			if ( $updated ) {
+				$task->payload = json_decode( $task->payload, true );
+				return $task;
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * İşi başarıyla tamamla (Veritabanını şişirmemek için direkt silinir).
+	 */
+	public function complete_task( int $id ): bool {
+		$table = $this->wpdb->prefix . 'hbt_queue';
+		return (bool) $this->wpdb->delete( $table, array( 'id' => $id ) );
+	}
+
+	/**
+	 * İşi başarısız olarak işaretle ve deneme (attempt) sayısını artır.
+	 */
+	public function fail_task( int $id, string $error_message = '' ): bool {
+		$table = $this->wpdb->prefix . 'hbt_queue';
+		
+		$task = $this->wpdb->get_row( $this->wpdb->prepare( "SELECT attempts FROM {$table} WHERE id = %d", $id ) );
+		if ( ! $task ) return false;
+
+		$attempts = (int) $task->attempts + 1;
+		// 3 denemeden sonra hala başarısızsa tamamen 'failed' yapıp bırakıyoruz.
+		$status = $attempts >= 3 ? 'failed' : 'pending'; 
+
+		return (bool) $this->wpdb->update( 
+			$table, 
+			array( 
+				'status'     => $status,
+				'attempts'   => $attempts,
+				'error_log'  => $error_message,
+				'updated_at' => current_time( 'mysql' )
+			), 
+			array( 'id' => $id ) 
+		);
+	}
+
+	/**
+	 * Canlı Monitör için kuyruk durumunu (İstatistikleri) getirir.
+	 */
+	public function get_queue_stats(): array {
+		$table = $this->wpdb->prefix . 'hbt_queue';
+		$stats = $this->wpdb->get_results( "
+			SELECT status, COUNT(*) as count 
+			FROM {$table} 
+			GROUP BY status
+		", ARRAY_A );
+
+		$result = array( 'pending' => 0, 'processing' => 0, 'failed' => 0, 'total' => 0 );
+		
+		if ( $stats ) {
+			foreach ( $stats as $row ) {
+				if ( isset( $result[ $row['status'] ] ) ) {
+					$result[ $row['status'] ] = (int) $row['count'];
+				}
+			}
+		}
+		
+		$result['total'] = $result['pending'] + $result['processing'] + $result['failed'];
+		return $result;
 	}
 }

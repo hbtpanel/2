@@ -1229,4 +1229,120 @@ jQuery(document).ready(function($) {
 			}, 800);
 		}
 	});
+	// =========================================================================
+	// YENİ: Canlı Monitör ve Kuyruk Sistemi (Live Queue Monitor)
+	// =========================================================================
+	var hbtMonitorInterval = null;
+	var isMonitorRunning = false;
+
+	function hbtFetchQueueStats() {
+		// Eğer kullanıcı başka sekmedeyse sunucuyu yormamak için veri çekmeyi durdur.
+		if ($('#mon-pending').length === 0 || !$('#tab-system').is(':visible')) {
+			return; 
+		}
+
+		hbtAjax('hbt_get_queue_stats', {}, function (res) {
+			$('#mon-pending').text(res.pending || 0);
+			$('#mon-processing').text(res.processing || 0);
+			$('#mon-failed').text(res.failed || 0);
+			$('#mon-total').text(res.total || 0);
+
+			var total = parseInt(res.total || 0);
+			var pending = parseInt(res.pending || 0);
+			
+			// İlerleme çubuğu ve Tahmini Süre (ETA) mantığı
+			if (total > 0) {
+				var completed = total - pending;
+				var percent = (completed / total) * 100;
+				$('#mon-progress-bar').css('width', percent + '%');
+				
+				if (pending > 0) {
+					var etaMinutes = Math.ceil(pending * 1.5 / 60); // Her sayfayı ortalama 1.5 sn kabul ediyoruz
+					var timeText = etaMinutes > 1 ? etaMinutes + ' dakika' : '1 dakikadan az';
+					$('#mon-eta').text('Tahmini Bitiş: ~' + timeText);
+				} else {
+					$('#mon-eta').text('Kuyruktaki tüm işlemler tamamlandı.');
+				}
+			} else {
+				$('#mon-progress-bar').css('width', '100%');
+				$('#mon-eta').text('Şu an kuyruk boş. Sistem dinleniyor.');
+			}
+
+			// YENİ EKLENEN: Canlı Logları Terminale Bas
+			if (res.recent_logs && res.recent_logs.length > 0) {
+				var logsHtml = '';
+				res.recent_logs.forEach(function(log) {
+					// Saati ayıklayalım (Sadece H:i:s kısmını al)
+					var timeOnly = log.created_at.split(' ')[1] || log.created_at;
+					logsHtml += '<div><span style="color:#64748B;">[' + timeOnly + ']</span> <span style="color:#F8FAFC;">' + log.message + '</span></div>';
+				});
+				$('#mon-live-logs').html(logsHtml);
+			} else {
+				$('#mon-live-logs').html('<div style="color:#64748B;">[Sistem] Henüz kaydedilmiş bir log bulunmuyor. Sistem dinleniyor...</div>');
+			}
+		});
+	}
+
+	function startMonitor() {
+		if (!isMonitorRunning) {
+			hbtFetchQueueStats(); // Beklemeden ilk veriyi hemen çek
+			hbtMonitorInterval = setInterval(hbtFetchQueueStats, 3000); // Ardından 3 sn'de bir tazele
+			isMonitorRunning = true;
+			$('#btn-monitor-toggle').text('Monitörü Durdur').css({'color':'#EF4444', 'border-color':'#EF4444'});
+		}
+	}
+
+	function stopMonitor() {
+		if (isMonitorRunning) {
+			clearInterval(hbtMonitorInterval);
+			isMonitorRunning = false;
+			$('#btn-monitor-toggle').text('Monitörü Başlat').css({'color':'#38BDF8', 'border-color':'#38BDF8'});
+			$('#mon-eta').text('Monitör durduruldu.');
+		}
+	}
+
+	// Kullanıcı Butona Bastığında
+	$(document).on('click', '#btn-monitor-toggle', function () {
+		isMonitorRunning ? stopMonitor() : startMonitor();
+	});
+
+	// Kullanıcı "Sistemi Tetikle"ye bastığında (Manuel Worker Run)
+	$(document).on('click', '#btn-monitor-run', function () {
+		var $btn = $(this);
+		$btn.text('Tetikleniyor...').prop('disabled', true);
+		
+		hbtAjax('hbt_trigger_worker', {}, function (res) {
+			hbtToast('İşçi (Worker) arka planda başarıyla tetiklendi.', 'success');
+			hbtFetchQueueStats();
+			setTimeout(function() {
+				$btn.text('Sistemi Tetikle (1 Tık)').prop('disabled', false);
+			}, 2000);
+		}, function() {
+			$btn.text('Sistemi Tetikle (1 Tık)').prop('disabled', false);
+		});
+	});
+
+	// Ayarlar sayfasında "Sistem" sekmesine geçildiğinde monitörü otomatik başlat
+	$(document).on('click', '.hbt-tab', function () {
+		if ($(this).data('tab') === 'system') {
+			startMonitor();
+		} else {
+			stopMonitor();
+		}
+	});
+	// Kullanıcı "Cron'u Ateşle"ye bastığında (Kuyruğa iş enjekte eder)
+	$(document).on('click', '#btn-monitor-add-jobs', function () {
+		var $btn = $(this);
+		$btn.text('Ekleniyor...').prop('disabled', true);
+		
+		hbtAjax('hbt_trigger_cron_fast', {}, function (res) {
+			hbtToast('Otomatik Cron görevleri başarıyla kuyruğa fırlatıldı.', 'success');
+			hbtFetchQueueStats(); // Monitörü anında güncelle
+			setTimeout(function() {
+				$btn.text("Cron'u Ateşle (İş Yükle)").prop('disabled', false);
+			}, 2000);
+		}, function() {
+			$btn.text("Cron'u Ateşle (İş Yükle)").prop('disabled', false);
+		});
+	});
 }(jQuery));

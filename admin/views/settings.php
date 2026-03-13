@@ -247,93 +247,56 @@ $queue_count = is_array($queue) ? count($queue) : 0;
 
         <div class="hbt-tab-content" id="tab-system" style="display:none;">
 
-            <div class="hbt-live-monitor hbt-card" style="margin-bottom: 24px; border: 1px solid #38BDF8; padding: 0; overflow: hidden;">
-                <div style="background: #0F172A; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1E293B;">
-                    <h3 style="margin: 0; color: #38BDF8; font-size: 15px; display: flex; align-items: center; gap: 8px;">
-                        <span class="dashicons dashicons-desktop" style="color: #38BDF8;"></span> Canlı Senkronizasyon Monitörü
+            <div class="hbt-live-monitor hbt-card" style="margin-bottom: 24px; padding: 0; overflow: hidden; border: 1px solid #E2E8F0;">
+                <div style="background: #0F172A; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center;">
+                    <h3 style="margin: 0; color: #fff; font-size: 16px; display: flex; align-items: center; gap: 8px;">
+                        <span class="dashicons dashicons-desktop" style="color: #38BDF8;"></span> 
+                        <?php esc_html_e( 'Akıllı Senkronizasyon Monitörü (HBT Queue Motoru)', 'hbt-trendyol-profit-tracker' ); ?>
                     </h3>
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                        <span class="hbt-pulse-light"></span>
-                        <span style="color: #94A3B8; font-size: 12px; font-family: monospace;">Bağlantı: Aktif | Bekleyen Görev: <strong id="mon-queue-count" style="color:#fff;">0</strong></span>
+                  <div style="display: flex; gap: 10px; align-items: center;">
+                        <button type="button" class="button button-secondary" id="btn-monitor-toggle" style="background:transparent; border:1px solid #38BDF8; color:#38BDF8; cursor:pointer;">Monitörü Başlat</button>
+                        <button type="button" class="button" id="btn-monitor-add-jobs" style="background:#F59E0B; border:none; color:#fff;">Cron'u Ateşle (İş Yükle)</button>
+                        <button type="button" class="button button-primary" id="btn-monitor-run">İşçiyi Çalıştır (Erit)</button>
+                    </div>
+                </div>
+                
+                <div style="padding: 20px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; background: #F8FAFC; border-bottom: 1px solid #E2E8F0;">
+                    <div style="background: #fff; padding: 15px; border-radius: 6px; border: 1px solid #E2E8F0; text-align: center;">
+                        <div style="font-size: 12px; color: #64748B; font-weight: 600; text-transform: uppercase;">Bekleyen Görev</div>
+                        <div id="mon-pending" style="font-size: 28px; font-weight: 700; color: #0F172A; margin-top: 5px;">0</div>
+                    </div>
+                    <div style="background: #fff; padding: 15px; border-radius: 6px; border: 1px solid #E2E8F0; text-align: center;">
+                        <div style="font-size: 12px; color: #64748B; font-weight: 600; text-transform: uppercase;">İşlenen (Şu An)</div>
+                        <div id="mon-processing" style="font-size: 28px; font-weight: 700; color: #3B82F6; margin-top: 5px;">0</div>
+                    </div>
+                    <div style="background: #fff; padding: 15px; border-radius: 6px; border: 1px solid #E2E8F0; text-align: center;">
+                        <div style="font-size: 12px; color: #64748B; font-weight: 600; text-transform: uppercase;">Başarısız (Hata)</div>
+                        <div id="mon-failed" style="font-size: 28px; font-weight: 700; color: #EF4444; margin-top: 5px;">0</div>
+                    </div>
+                    <div style="background: #fff; padding: 15px; border-radius: 6px; border: 1px solid #E2E8F0; text-align: center;">
+                        <div style="font-size: 12px; color: #64748B; font-weight: 600; text-transform: uppercase;">Toplam İş Yükü</div>
+                        <div id="mon-total" style="font-size: 28px; font-weight: 700; color: #10B981; margin-top: 5px;">0</div>
                     </div>
                 </div>
 
-                <div style="display: flex; flex-wrap: wrap;">
-                    <div style="flex: 1 1 50%; padding: 20px; border-right: 1px solid var(--hbt-border); background: #F8FAFC;">
-                        <div id="hbt-monitor-idle" style="display: block; text-align: center; padding: 40px 0;">
-                            <span class="dashicons dashicons-coffee" style="font-size: 40px; color: #CBD5E1; width: 40px; height: 40px; display: block; margin: 0 auto 15px;"></span>
-                            <p style="color: #64748B; font-weight: 500; margin: 0;">Şu an kuyrukta bekleyen işlem yok.</p>
-                            <p style="color: #94A3B8; font-size: 12px; margin-top: 5px;">Sistem uyku modunda, yeni görev bekliyor.</p>
+                <div style="padding: 15px 20px; background: #fff;">
+                    <div style="display: flex; justify-content: space-between; font-size: 13px; color: #475569; margin-bottom: 8px;">
+                        <strong>İşlem Durumu:</strong>
+                        <span id="mon-eta">Tahmini Süre: Hesaplanıyor...</span>
+                    </div>
+                    <div style="width: 100%; background: #E2E8F0; border-radius: 4px; height: 8px; overflow: hidden;">
+                        <div id="mon-progress-bar" style="width: 0%; height: 100%; background: #10B981; transition: width 0.5s ease;"></div>
+                    </div>
+                    <p style="font-size: 12px; color: #94A3B8; margin: 10px 0 0 0;">(Bu monitör, sunucuyu yormamak adına yalnızca bu sekme açıkken her 3 saniyede bir veritabanını yoklar.)</p>
+                    <div style="margin-top: 15px; border: 1px solid #334155; border-radius: 6px; overflow: hidden;">
+                        <div style="background: #1E293B; padding: 8px 15px; font-size: 11px; color: #94A3B8; font-weight: bold; border-bottom: 1px solid #334155; display:flex; justify-content:space-between;">
+                            <span>>_ SİSTEM TERMİNALİ (CANLI AKIŞ)</span>
+                            <span style="color:#10B981;">● Online</span>
                         </div>
-
-                        <div id="hbt-monitor-active" style="display: none;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                                <div>
-                                    <span style="font-size: 11px; font-weight: 600; color: #64748B; text-transform: uppercase; letter-spacing: 0.5px;">Şu An İşleniyor</span>
-                                    <h4 id="mon-store-name" style="margin: 0; color: #0F172A; font-size: 18px; margin-top: 4px;">-</h4>
-                                </div>
-                                <div style="text-align: right;">
-                                    <span style="font-size: 11px; font-weight: 600; color: #64748B; text-transform: uppercase; letter-spacing: 0.5px;">İşlem Tipi</span>
-                                    <span id="mon-sync-type" style="display: block; background: #DBEAFE; color: #1D4ED8; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; margin-top: 4px;">-</span>
-                                </div>
-                            </div>
-
-                            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 20px;">
-                                <div style="background: #fff; border: 1px solid #E2E8F0; padding: 12px; border-radius: 6px; text-align: center;">
-                                    <span style="font-size: 20px; font-weight: 700; color: #0F172A; display: block;" id="mon-fetched">0</span>
-                                    <span style="font-size: 11px; color: #64748B; font-weight: 600;">Çekilen Sipariş</span>
-                                </div>
-                                <div style="background: #fff; border: 1px solid #E2E8F0; padding: 12px; border-radius: 6px; text-align: center;">
-                                    <span style="font-size: 20px; font-weight: 700; color: #22C55E; display: block;" id="mon-inserted">0</span>
-                                    <span style="font-size: 11px; color: #64748B; font-weight: 600;">Yeni Eklenen</span>
-                                </div>
-                                <div style="background: #fff; border: 1px solid #E2E8F0; padding: 12px; border-radius: 6px; text-align: center;">
-                                    <span style="font-size: 20px; font-weight: 700; color: #3B82F6; display: block;" id="mon-updated">0</span>
-                                    <span style="font-size: 11px; color: #64748B; font-weight: 600;">Güncellenen</span>
-                                </div>
-                                <div style="background: #fff; border: 1px solid #E2E8F0; padding: 12px; border-radius: 6px; text-align: center;">
-                                    <span style="font-size: 20px; font-weight: 700; color: #94A3B8; display: block;" id="mon-skipped">0</span>
-                                    <span style="font-size: 11px; color: #64748B; font-weight: 600;">Atlanan</span>
-                                </div>
-                            </div>
-
-                            <div style="background: #EFF6FF; padding: 10px 15px; border-radius: 6px; border: 1px solid #BFDBFE; font-size: 13px; color: #1E3A8A; display: flex; align-items: center; gap: 8px;">
-                                <span class="dashicons dashicons-update hbt-spinner" style="color: #3B82F6;"></span>
-                                <span>Trendyol API bağlantısı kuruluyor... (Sayfa: <strong id="mon-page">1</strong>)</span>
-                            </div>
+                        <div id="mon-live-logs" style="background: #0F172A; color: #38BDF8; font-family: 'Courier New', Courier, monospace; font-size: 12px; padding: 15px; height: 140px; overflow-y: auto; line-height: 1.6;">
+                            [Sistem] Monitör bağlantısı bekleniyor...
                         </div>
                     </div>
-
-                    <div style="flex: 1 1 50%; display: flex; flex-direction: column; background: #0F172A;">
-                        <div style="flex: 1; padding: 15px 20px 10px 20px; display: flex; flex-direction: column; border-bottom: 1px solid #1E293B;">
-                            <div style="margin-bottom: 5px;">
-                                <span style="color: #38BDF8; font-size: 11px; font-family: monospace; font-weight: bold;">[root@erp ~]# Sistem Görevleri</span>
-                            </div>
-                            <div id="hbt-terminal-output" style="flex-grow: 1; background: #020617; border: 1px solid #1E293B; border-radius: 6px; padding: 10px; font-family: monospace; font-size: 11px; color: #4ADE80; overflow-y: auto; height: 90px; max-height: 90px; line-height: 1.5;">
-                                <div style="color: #64748B;">> Sisteme bağlantı sağlandı...</div>
-                            </div>
-                        </div>
-                        <div style="flex: 1; padding: 10px 20px 15px 20px; display: flex; flex-direction: column;">
-                            <div style="margin-bottom: 5px;">
-                                <span style="color: #A78BFA; font-size: 11px; font-family: monospace; font-weight: bold;">[root@erp ~]# Canlı Sipariş Akışı (Stream)</span>
-                            </div>
-                            <div id="hbt-stream-output" style="flex-grow: 1; background: #020617; border: 1px solid #1E293B; border-radius: 6px; padding: 10px; font-family: monospace; font-size: 11px; color: #F87171; overflow-y: auto; height: 90px; max-height: 90px; line-height: 1.5;">
-                                <div style="color: #64748B;">> Yeni veya güncellenen siparişler bekleniyor...</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div style="background: #fff; padding: 15px 20px; border-top: 1px solid var(--hbt-border); display: flex; gap: 10px; flex-wrap: wrap;">
-                    <button type="button" class="button button-secondary" id="btn-monitor-add">
-                        <span class="dashicons dashicons-plus-alt2" style="margin-top:3px;"></span> Hızlı Tarama Başlat (Kuyruğa Ekle)
-                    </button>
-                    <button type="button" class="button button-primary" id="btn-monitor-run">
-                        <span class="dashicons dashicons-controls-play" style="margin-top:3px;"></span> İşçiyi Manuel Tetikle
-                    </button>
-                    <button type="button" class="button" id="btn-monitor-clear" style="color: #DC2626; border-color: #DC2626; margin-left: auto;">
-                        <span class="dashicons dashicons-trash" style="margin-top:3px;"></span> Kuyruğu Temizle
-                    </button>
                 </div>
             </div>
 

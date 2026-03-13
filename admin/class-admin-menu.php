@@ -39,8 +39,10 @@ class HBT_Admin_Menu {
 		add_action( 'wp_ajax_hbt_save_profit_goal', array( $this, 'ajax_save_profit_goal' ) );
 		add_action( 'wp_ajax_hbt_save_settings', array( $this, 'ajax_save_settings' ) );
 		add_action( 'admin_head', array( $this, 'add_ios_pwa_tags' ) );
-		// PWA Uygulaması için WP oturumunu 1 yıl boyunca açık tut
+		add_action( 'wp_ajax_hbt_get_queue_stats', array( $this, 'ajax_get_queue_stats' ) );
+		add_action( 'wp_ajax_hbt_trigger_worker', array( $this, 'ajax_trigger_worker' ) );
 		add_filter( 'auth_cookie_expiration', function() { return 31556926; } );
+		add_action( 'wp_ajax_hbt_trigger_cron_fast', array( $this, 'ajax_trigger_cron_fast' ) );
 
 		// AJAX handlers.
 		add_action( 'wp_ajax_hbt_test_connection', array( $this, 'ajax_test_connection' ) );
@@ -1263,19 +1265,61 @@ public function ajax_bulk_import_costs(): void {
 	}
 
 	/**
- * iOS cihazlar için PWA (Tam Ekran Uygulama) etiketlerini ekler.
- */
-public function add_ios_pwa_tags(): void {
-    // Bu etiketleri sadece bizim eklentinin sayfalarındaysak yükle
-    $screen = get_current_screen();
-    if ( ! $screen || strpos( $screen->id, 'hbt-tpt' ) === false ) {
-        return;
+     * iOS cihazlar için PWA (Tam Ekran Uygulama) etiketlerini ekler.
+     */
+    public function add_ios_pwa_tags(): void {
+        // Bu etiketleri sadece bizim eklentinin sayfalarındaysak yükle
+        $screen = get_current_screen();
+        if ( ! $screen || strpos( $screen->id, 'hbt-tpt' ) === false ) {
+            return;
+        }
+        ?>
+        <meta name="apple-mobile-web-app-title" content="Kâr Takip">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+        
+        <?php
     }
-    ?>
-    <meta name="apple-mobile-web-app-title" content="Kâr Takip">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    
-    <?php
-}
-}
+
+   /** AJAX: Canlı Monitör İçin İstatistikleri ve Logları Getirir. */
+    public function ajax_get_queue_stats(): void {
+        $this->verify_ajax();
+        $stats = HBT_Database::instance()->get_queue_stats();
+        
+        // YENİ EKLENEN: Veritabanından son 6 canlı logu çekip arayüze gönderiyoruz
+        global $wpdb;
+        $logs = $wpdb->get_results( "SELECT created_at, message FROM {$wpdb->prefix}hbt_sync_logs ORDER BY id DESC LIMIT 6", ARRAY_A );
+        $stats['recent_logs'] = $logs;
+
+        wp_send_json_success( $stats );
+    }
+
+    /** AJAX: Kullanıcının Butonla Manuel İşçi Tetiklemesini Sağlar. */
+    public function ajax_trigger_worker(): void {
+        $this->verify_ajax();
+        if ( class_exists('HBT_Cron_Manager') ) {
+            HBT_Cron_Manager::instance()->process_background_queue();
+            wp_send_json_success( array( 'message' => __( 'İşçi başarıyla tetiklendi.', 'hbt-trendyol-profit-tracker' ) ) );
+        } else {
+            wp_send_json_error( array( 'message' => __( 'Cron Manager bulunamadı.', 'hbt-trendyol-profit-tracker' ) ) );
+        }
+    }
+
+    /** AJAX: Otomatik Cron görevini beklemeden manuel olarak kuyruğa iş atar. */
+    public function ajax_trigger_cron_fast(): void {
+        $this->verify_ajax();
+        
+        try {
+            if ( class_exists('HBT_Cron_Manager') ) {
+                HBT_Cron_Manager::instance()->sync_orders_fast();
+                wp_send_json_success( array( 'message' => __( 'Cron (Hızlı Tarama) kuyruğa eklendi.', 'hbt-trendyol-profit-tracker' ) ) );
+            } else {
+                wp_send_json_error( array( 'message' => 'HBT_Cron_Manager sınıfı bulunamadı.' ) );
+            }
+        } catch ( Throwable $e ) {
+            $error_msg = 'Kritik PHP Hatası: ' . $e->getMessage() . ' (Satır: ' . $e->getLine() . ' - Dosya: ' . basename($e->getFile()) . ')';
+            wp_send_json_error( array( 'message' => $error_msg ) );
+        }
+    }
+
+} // Sınıfın ana kapanış parantezi
