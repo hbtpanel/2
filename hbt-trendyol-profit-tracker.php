@@ -106,7 +106,47 @@ final class HBT_Trendyol_Profit_Tracker {
 	 */
 	private function __construct() {
 		$this->init_hooks();
-	}
+	
+	add_action( 'admin_bar_menu', 'hbt_add_mobile_refresh_button', 100 );
+
+function hbt_add_mobile_refresh_button( $wp_admin_bar ) {
+    // Sadece admin panelindeysek ve kullanıcı giriş yapmışsa göster
+    if ( ! is_admin() || ! is_user_logged_in() ) {
+        return;
+    }
+
+    $wp_admin_bar->add_node( array(
+        'id'    => 'hbt-refresh-btn',
+        'title' => '<span class="ab-icon dashicons dashicons-image-rotate"></span><span class="ab-label" style="display:none;">Yenile</span>', // Mobilde yer kaplamaması için yazıyı gizleyebiliriz
+        'href'  => 'javascript:window.location.reload(true);', // JS ile sayfayı hard-reload yapar
+        'meta'  => array(
+            'title' => 'Sayfayı Yenile',
+            'class' => 'hbt-mobile-refresh'
+        )
+    ) );
+}
+add_action( 'admin_head', 'hbt_force_mobile_refresh_button_css' );
+
+function hbt_force_mobile_refresh_button_css() {
+    // Sadece admin panelinde çalışsın
+    if ( ! is_admin() ) return;
+    ?>
+    <style>
+        /* 782px altı (Mobil Cihazlar) için WordPress'in gizleme huyunu eziyoruz */
+        @media screen and (max-width: 782px) {
+            #wpadminbar #wp-admin-bar-hbt-refresh-btn {
+                display: block !important;
+            }
+            /* İkonun ortalanması ve düzgün görünmesi için ufak bir ayar */
+            #wpadminbar #wp-admin-bar-hbt-refresh-btn .ab-item {
+                text-align: center;
+                padding: 0 5px;
+            }
+        }
+    </style>
+    <?php
+}
+		}
 
 	/**
 	 * Initialize WordPress hooks.

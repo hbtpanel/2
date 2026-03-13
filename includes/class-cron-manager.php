@@ -35,7 +35,7 @@ class HBT_Cron_Manager {
 	 * @var array
 	 */
 	private array $events = array(
-		'hbt_sync_orders_fast'       => 'hbt_every_15_min', 
+		'hbt_sync_orders_fast'       => 'hbt_every_5_min', 
 		'hbt_sync_orders_deep'       => 'twicedaily', // Derin Döngü günde 2 kez çalışacak
 		'hbt_sync_currency'          => 'hourly',
 		'hbt_sync_financials'        => 'hbt_every_6_hours',
@@ -110,6 +110,13 @@ class HBT_Cron_Manager {
 	 * @return array
 	 */
 	public function add_custom_intervals( array $schedules ): array {
+		// --- YENİ EKLENEN 5 DAKİKA ---
+		$schedules['hbt_every_5_min'] = array(
+			'interval' => 5 * MINUTE_IN_SECONDS,
+			'display'  => __( 'Every 5 Minutes', 'hbt-trendyol-profit-tracker' ),
+		);
+		// -----------------------------
+
 		$schedules['hbt_every_15_min'] = array(
 			'interval' => 15 * MINUTE_IN_SECONDS,
 			'display'  => __( 'Every 15 Minutes', 'hbt-trendyol-profit-tracker' ),
@@ -205,9 +212,8 @@ class HBT_Cron_Manager {
 
 		return $job['id'];
 	}
-
-	/**
-	 * Process background queue (GÜNCELLENDİ: Artık Log Tablosuna Yazıyor).
+/**
+	 * Process background queue (GÜNCELLENDİ: Artık Log Tablosuna Yazıyor ve Öncelikli Çalışıyor).
 	 */
 	public function process_background_queue(): void {
 		$queue = get_option( self::QUEUE_OPTION, array() );
@@ -215,7 +221,28 @@ class HBT_Cron_Manager {
 			return;
 		}
 
-		$max_jobs_per_run = 2; // Daha güvenli olması için 2'ye çektik
+		// --- YENİ EKLENEN: ÖNCELİKLENDİRME (PRIORITY QUEUE) MANTIĞI ---
+		// Kuyruktaki işleri işlemeye başlamadan önce öncelik sırasına göre diziyoruz.
+		usort( $queue, function( $a, $b ) {
+			// 'auto_fast' (Hızlı Tarama) ve 'manual' (Kullanıcı tetiklemesi) işlemlere 1. Öncelik ver.
+			// 'auto_deep' (Derin Tarama) ve diğerlerine 2. Öncelik ver.
+			$priority_a = ( isset($a['sync_type']) && in_array($a['sync_type'], array('auto_fast', 'manual')) ) ? 1 : 2;
+			$priority_b = ( isset($b['sync_type']) && in_array($b['sync_type'], array('auto_fast', 'manual')) ) ? 1 : 2;
+			
+			// Eğer her iki işin önceliği aynıysa (örneğin ikisi de derin taramaysa veya ikisi de hızlıysa),
+			// kuyruğa ilk giren ilk çıksın (FIFO mantığını koru).
+			if ( $priority_a === $priority_b ) {
+				$time_a = isset($a['created_at']) ? strtotime($a['created_at']) : 0;
+				$time_b = isset($b['created_at']) ? strtotime($b['created_at']) : 0;
+				return $time_a <=> $time_b;
+			}
+			
+			// Önceliği 1 olanları dizinin başına al.
+			return $priority_a <=> $priority_b;
+		});
+		// --------------------------------------------------------------
+
+		$max_jobs_per_run = 5; // Daha güvenli olması için 2'ye çektik
 		$changed = false;
 
 		for ( $i = 0; $i < $max_jobs_per_run && ! empty( $queue ); $i++ ) {
