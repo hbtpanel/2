@@ -40,6 +40,7 @@ class HBT_Settings {
 		'pdf_orientation'             => 'landscape',
 		'cron_financial_interval'     => 360,
 		'cron_product_interval'       => 1440,
+		'enable_archive_sync'         => 0, 
 	);
 
 	/**
@@ -138,6 +139,7 @@ class HBT_Settings {
 			'notification_cost_missing' => 'rest_sanitize_boolean',
 			'export_default_format'     => 'sanitize_text_field',
 			'pdf_orientation'           => 'sanitize_text_field',
+			'enable_archive_sync'       => 'absint', // YENİ EKLENEN
 		);
 
 		foreach ( $sanitizers as $key => $callback ) {

@@ -37,6 +37,7 @@ class HBT_Cron_Manager {
 	private array $events = array(
 		'hbt_sync_orders_fast'       => 'hbt_every_5_min', 
 		'hbt_sync_orders_deep'       => 'twicedaily', // Derin Döngü günde 2 kez çalışacak
+		'hbt_sync_orders_archive'    => 'daily', // Arşiv Döngüsü günde 1 kez çalışacak
 		'hbt_sync_currency'          => 'hourly',
 		'hbt_sync_financials'        => 'hbt_every_6_hours',
 		'hbt_run_calculations'       => 'hourly',
@@ -75,13 +76,13 @@ class HBT_Cron_Manager {
 		// Register cron callbacks (YENİ SİSTEM).
 		add_action( 'hbt_sync_orders_fast', array( $this, 'sync_orders_fast' ) );
 		add_action( 'hbt_sync_orders_deep', array( $this, 'sync_orders_deep' ) );
+		add_action( 'hbt_sync_orders_archive', array( $this, 'sync_orders_archive' ) );
 		add_action( 'hbt_sync_currency', array( $this, 'sync_currency_rates' ) );
 		add_action( 'hbt_sync_financials', array( $this, 'sync_financial_data' ) );
 		add_action( 'hbt_run_calculations', array( $this, 'run_calculations' ) );
 		add_action( 'hbt_check_returns', array( $this, 'check_returns' ) );
 		add_action( 'hbt_sync_products', array( $this, 'sync_products' ) );
 		add_action( 'hbt_cleanup_notifications', array( $this, 'cleanup_notifications' ) );
-		add_action( 'wp_ajax_hbt_trigger_cron_fast', array( $this, 'ajax_trigger_cron_fast' ) );
 
 		// Background queue worker hook (light, bounded work)
 		add_action( 'hbt_process_background_queue', array( $this, 'process_background_queue' ) );
@@ -174,97 +175,109 @@ class HBT_Cron_Manager {
 	// -------------------------------------------------------------------------
 
 	/**
-	 * Enqueue store sync job into background queue (GÜVENLİ VERSİYON).
+	 * Enqueue store sync job into background queue (GÜNCELLENDİ).
 	 */
 	public function enqueue_store_sync( $store, ?string $start_date = null, ?string $end_date = null, ?int $page = 0, int $size = 100, string $sync_type = 'manual' ): string {
-		global $wpdb; // EKLENDİ: Gizli property yerine WordPress'in ana veritabanı nesnesini kullanıyoruz.
-		
-		// 1. Gelen $store verisini güvenli bir şekilde ID'ye çevir
-		$store_id = 0;
-		if ( is_object( $store ) && isset( $store->id ) ) {
-			$store_id = (int) $store->id;
-		} elseif ( is_array( $store ) && isset( $store['id'] ) ) {
-			$store_id = (int) $store['id'];
-		} elseif ( is_numeric( $store ) ) {
-			$store_id = (int) $store;
+		$queue = get_option( self::QUEUE_OPTION, array() );
+		if ( ! is_array( $queue ) ) $queue = array();
+
+		// --- YENİ EKLENEN KONTROL (Kuyruk Şişmesini ve Atlamayı Önler) ---
+		// Eğer bu mağaza bu işlem tipiyle (örn: auto_fast) zaten sırada bekliyorsa, 
+		// işlemi tekrar sıraya sokma ve mevcut olanı sakince bekle.
+		foreach ( $queue as $existing_job ) {
+			if ( $existing_job['store_id'] == $store->id && $existing_job['sync_type'] === $sync_type ) {
+				return $existing_job['id']; // Zaten var, eklemeyi durdur!
+			}
 		}
+		// ------------------------------------------------------------------
 
-		if ( empty( $store_id ) ) {
-			return ''; 
-		}
-
-		// 2. Zaten aynı tipte bekleyen bir iş var mı kontrol et
-		$table = $wpdb->prefix . 'hbt_queue';
-		$existing = $wpdb->get_var( $wpdb->prepare( "
-			SELECT id FROM {$table} 
-			WHERE store_id = %d AND task_type = %s AND status IN ('pending', 'processing')
-			LIMIT 1
-		", $store_id, $sync_type ) );
-
-		if ( $existing ) {
-			return (string) $existing; 
-		}
-
-		// 3. Yeni görevi veritabanına ekle
-		$payload = array(
+		$job = array(
+			'id'         => uniqid( 'hbtjob_', true ),
+			'store_id'   => (int) $store->id,
+			'sync_type'  => $sync_type,
 			'start_date' => $start_date,
 			'end_date'   => $end_date,
 			'page'       => $page ?? 0,
 			'size'       => $size,
+			'retries'    => 0,
 			'fetched'    => 0,
 			'inserted'   => 0,
 			'updated'    => 0,
 			'skipped'    => 0,
 			'failed'     => 0,
+			'created_at' => current_time( 'mysql' ),
+			'updated_at' => current_time( 'mysql' ),
 		);
 
-		$task_id = $this->db->enqueue_task( $store_id, $sync_type, $payload );
+		$queue[] = $job;
+		update_option( self::QUEUE_OPTION, $queue );
 
-		return (string) $task_id;
+		return $job['id'];
 	}
 /**
-	/**
-	 * Process background queue (YENİ SİSTEM: Özel Tablo ve Race Condition Korumalı).
+	 * Process background queue (GÜNCELLENDİ: Artık Log Tablosuna Yazıyor ve Öncelikli Çalışıyor).
 	 */
 	public function process_background_queue(): void {
-		global $wpdb; // EKLENDİ
-		$max_jobs_per_run = 2; 
+		$queue = get_option( self::QUEUE_OPTION, array() );
+		if ( ! is_array( $queue ) || empty( $queue ) ) {
+			return;
+		}
 
-		for ( $i = 0; $i < $max_jobs_per_run; $i++ ) {
-			$task = $this->db->get_next_task();
+		// --- YENİ EKLENEN: ÖNCELİKLENDİRME (PRIORITY QUEUE) MANTIĞI ---
+		// Kuyruktaki işleri işlemeye başlamadan önce öncelik sırasına göre diziyoruz.
+		usort( $queue, function( $a, $b ) {
+			// 'auto_fast' (Hızlı Tarama) ve 'manual' (Kullanıcı tetiklemesi) işlemlere 1. Öncelik ver.
+			// 'auto_deep' (Derin Tarama) ve diğerlerine 2. Öncelik ver.
+            $priority_a = ( isset($a['sync_type']) && in_array($a['sync_type'], array('auto_fast', 'manual')) ) ? 1 : ( (isset($a['sync_type']) && $a['sync_type'] === 'auto_deep') ? 2 : 3 );
+            $priority_b = ( isset($b['sync_type']) && in_array($b['sync_type'], array('auto_fast', 'manual')) ) ? 1 : ( (isset($b['sync_type']) && $b['sync_type'] === 'auto_deep') ? 2 : 3 );
 			
-			if ( ! $task ) {
-				break; 
+			// Eğer her iki işin önceliği aynıysa (örneğin ikisi de derin taramaysa veya ikisi de hızlıysa),
+			// kuyruğa ilk giren ilk çıksın (FIFO mantığını koru).
+			if ( $priority_a === $priority_b ) {
+				$time_a = isset($a['created_at']) ? strtotime($a['created_at']) : 0;
+				$time_b = isset($b['created_at']) ? strtotime($b['created_at']) : 0;
+				return $time_a <=> $time_b;
 			}
+			
+			// Önceliği 1 olanları dizinin başına al.
+			return $priority_a <=> $priority_b;
+		});
+		// --------------------------------------------------------------
 
-			$store = $this->db->get_store( (int) $task->store_id );
+		$max_jobs_per_run = 5; // Daha güvenli olması için 2'ye çektik
+		$changed = false;
+
+		for ( $i = 0; $i < $max_jobs_per_run && ! empty( $queue ); $i++ ) {
+			$job = $queue[0];
+
+			$store = $this->db->get_store( (int) $job['store_id'] );
 			if ( ! $store ) {
-				$this->db->complete_task( (int) $task->id ); 
+				array_shift( $queue );
+				$changed = true;
 				continue;
 			}
 
-			$payload   = $task->payload; 
-			$page      = isset( $payload['page'] ) ? (int) $payload['page'] : 0;
-			$size      = isset( $payload['size'] ) ? (int) $payload['size'] : 100;
-			$sync_type = $task->task_type;
+			$page = isset( $job['page'] ) ? (int) $job['page'] : 0;
+			$size = isset( $job['size'] ) ? (int) $job['size'] : 100;
+			$sync_type = isset( $job['sync_type'] ) ? $job['sync_type'] : 'manual';
 
-			$result = $this->sync_store_orders( $store, $page, $size, $payload['start_date'] ?? null, $payload['end_date'] ?? null );
+			$result = $this->sync_store_orders( $store, $page, $size, $job['start_date'] ?? null, $job['end_date'] ?? null );
 
 			if ( is_wp_error( $result ) ) {
-				$this->db->fail_task( (int) $task->id, $result->get_error_message() );
-				
-				$check_status = $wpdb->get_var( $wpdb->prepare( "SELECT status FROM {$wpdb->prefix}hbt_queue WHERE id = %d", $task->id ) );
-				
-				if ( $check_status === 'failed' ) {
+				$job['retries'] = (int) ( $job['retries'] ?? 0 ) + 1;
+				$job['updated_at'] = current_time( 'mysql' );
+
+				if ( $job['retries'] > 3 ) {
+					// 3 Kere denedi olmadıysa log tablosuna HATA yaz ve işi iptal et
 					$this->db->log_sync_result( array(
 						'store_id'   => $store->id,
 						'store_name' => $store->store_name,
 						'sync_type'  => $sync_type,
-						'fetched'    => $payload['fetched'] ?? 0,
-						'inserted'   => $payload['inserted'] ?? 0,
-						'updated'    => $payload['updated'] ?? 0,
-						'skipped'    => $payload['skipped'] ?? 0,
-						'failed'     => $payload['failed'] ?? 0,
+						'fetched'    => $job['fetched'] ?? 0,
+						'inserted'   => $job['inserted'] ?? 0,
+						'updated'    => $job['updated'] ?? 0,
+						'skipped'    => $job['skipped'] ?? 0,
+						'failed'     => $job['failed'] ?? 0,
 						'message'    => 'Sistem 3 kez denedi ancak Trendyol API yanıt vermedi. Hata: ' . esc_html( $result->get_error_message() ),
 						'status'     => 'error'
 					) );
@@ -273,45 +286,49 @@ class HBT_Cron_Manager {
 						'sync_error',
 						__( 'Arka Plan Senkronizasyon Hatası', 'hbt-trendyol-profit-tracker' ),
 						sprintf(
-							__( '%1$s mağazası için arka plan senkronizasyonu başarısız oldu. Çok fazla deneme, iş iptal edildi.', 'hbt-trendyol-profit-tracker' ),
-							esc_html( $store->store_name )
+							__( '%1$s mağazası için arka plan senkronizasyonu başarısız oldu: %2$s', 'hbt-trendyol-profit-tracker' ),
+							esc_html( $store->store_name ),
+							__( 'Çok fazla deneme, iş iptal edildi.', 'hbt-trendyol-profit-tracker' )
 						),
 						null
 					);
+
+					array_shift( $queue );
+				} else {
+					array_shift( $queue );
+					$queue[] = $job;
 				}
+				$changed = true;
 			} else {
+				// BAŞARILI ÇEKİM: İstatistikleri güncelle
 				$returned = is_array( $result ) && isset( $result['returned'] ) ? (int) $result['returned'] : 0;
 				
-				$payload['fetched']  = (int)($payload['fetched'] ?? 0) + $returned;
-				$payload['inserted'] = (int)($payload['inserted'] ?? 0) + (int)($result['inserted'] ?? 0);
-				$payload['updated']  = (int)($payload['updated'] ?? 0) + (int)($result['updated'] ?? 0);
-				$payload['skipped']  = (int)($payload['skipped'] ?? 0) + (int)($result['skipped'] ?? 0);
-				$payload['failed']   = (int)($payload['failed'] ?? 0) + (int)($result['failed'] ?? 0);
+				// DÜZELTME: API'den gelen asıl sayıyı ve Atlanan (Skipped) verisini kaydet
+				$job['fetched']  = (int)($job['fetched'] ?? 0) + $returned;
+				$job['inserted'] = (int)($job['inserted'] ?? 0) + (int)($result['inserted'] ?? 0);
+				$job['updated']  = (int)($job['updated'] ?? 0) + (int)($result['updated'] ?? 0);
+				$job['skipped']  = (int)($job['skipped'] ?? 0) + (int)($result['skipped'] ?? 0);
+				$job['failed']   = (int)($job['failed'] ?? 0) + (int)($result['failed'] ?? 0);
 
 				if ( $returned >= $size ) {
-					$payload['page'] = $page + 1;
-					$wpdb->update( 
-						$wpdb->prefix . 'hbt_queue', 
-						array( 
-							'payload'    => wp_json_encode( $payload ), 
-							'status'     => 'pending', 
-							'updated_at' => current_time( 'mysql' ) 
-						), 
-						array( 'id' => $task->id ) 
-					);
+					$job['page'] = $page + 1;
+					$job['updated_at'] = current_time( 'mysql' );
+
+					array_shift( $queue );
+					$queue[] = $job;
 				} else {
-					$s_type_label = $sync_type === 'auto_fast' ? 'Hızlı Tarama' : ($sync_type === 'auto_deep' ? 'Derin Tarama' : 'Manuel Tarama');
-					$time_taken   = max( 1, current_time('timestamp') - strtotime($task->created_at) );
+					// İŞ TAMAMLANDI: Süreyi ve detaylı raporu hesapla
+					$s_type_label = $sync_type === 'auto_fast' ? 'Hızlı Tarama' : ($sync_type === 'auto_deep' ? 'Derin Tarama' : ($sync_type === 'auto_archive' ? 'Arşiv Tarama' : 'Manuel Tarama'));
+					$time_taken   = max(1, current_time('timestamp') - strtotime($job['created_at']));
 					$time_str     = $time_taken >= 60 ? floor($time_taken / 60) . ' dk ' . ($time_taken % 60) . ' sn' : $time_taken . ' saniye';
 					
 					$rich_message = sprintf(
-						"[%s - %s] Rapor: Toplam %d sipariş çekildi. (%d Yeni, %d Güncellenen, %d Atlanan). İşlem süresi: %s",
-						$store->store_name,
+						"[%s] Rapor: Toplam %d sipariş çekildi. (%d Yeni, %d Güncellenen, %d Atlanan). İşlem süresi: %s",
 						$s_type_label,
-						$payload['fetched'],
-						$payload['inserted'],
-						$payload['updated'],
-						$payload['skipped'],
+						$job['fetched'],
+						$job['inserted'],
+						$job['updated'],
+						$job['skipped'],
 						$time_str
 					);
 
@@ -319,18 +336,23 @@ class HBT_Cron_Manager {
 						'store_id'   => $store->id,
 						'store_name' => $store->store_name,
 						'sync_type'  => $sync_type,
-						'fetched'    => $payload['fetched'],
-						'inserted'   => $payload['inserted'],
-						'updated'    => $payload['updated'],
-						'skipped'    => $payload['skipped'],
-						'failed'     => $payload['failed'],
+						'fetched'    => $job['fetched'],
+						'inserted'   => $job['inserted'],
+						'updated'    => $job['updated'],
+						'skipped'    => $job['skipped'],
+						'failed'     => $job['failed'],
 						'message'    => $rich_message,
 						'status'     => 'success'
 					) );
 
-					$this->db->complete_task( (int) $task->id );
+					array_shift( $queue );
 				}
+				$changed = true;
 			}
+		}
+
+		if ( $changed ) {
+			update_option( self::QUEUE_OPTION, $queue );
 		}
 	}
 
@@ -362,9 +384,36 @@ class HBT_Cron_Manager {
 		$start_date = $dt->format('Y-m-d\TH:i:s');
 		
 		foreach ( $stores as $store ) {
-			$this->enqueue_store_sync( $store, $start_date, $end_date, 0, 100, 'auto_deep' );
+			$this->enqueue_store_sync( $store, $start_date, $end_date, 0, 200, 'auto_deep' );
 		}
 	}
+
+	/**
+     * Arşiv Döngüsü: 14 günden eski, 28 günden yeni siparişleri tarar (Geç iadeler ve faturalar için)
+     */
+   public function sync_orders_archive(): void {
+        // YENİ ÇAĞIRMA ŞEKLİ:
+        $is_enabled = (int) get_option( 'hbt_tpt_enable_archive_sync', 0 );
+        
+        if ( ! $is_enabled ) {
+            return;
+        }
+
+        $stores = $this->db->get_stores( true );
+        $tz = new DateTimeZone('Europe/Istanbul');
+        
+        $dt_end = new DateTime('now', $tz);
+        $dt_end->modify('-14 days');
+        $end_date = $dt_end->format('Y-m-d\TH:i:s');
+        
+        $dt_start = new DateTime('now', $tz);
+        $dt_start->modify('-28 days');
+        $start_date = $dt_start->format('Y-m-d\TH:i:s');
+        
+        foreach ( $stores as $store ) {
+            $this->enqueue_store_sync( $store, $start_date, $end_date, 0, 200, 'auto_archive' );
+        }
+    }
 
 	/**
 	 * Sizin orijinal, hatasız sipariş çekme kodunuz (HİÇ DOKUNULMADI)
@@ -1041,23 +1090,6 @@ class HBT_Cron_Manager {
 		require_once HBT_TPT_PLUGIN_DIR . 'includes/class-trendyol-api.php';
 		$api = new HBT_Trendyol_API();
 		$api->fetch_all_transactions(); // API sınıfınızdaki gerçek işlemleri çeken fonksiyonun adını yazmalısınız.
-	}
-	/** AJAX: Otomatik Cron görevini beklemeden manuel olarak kuyruğa iş atar. */
-	public function ajax_trigger_cron_fast(): void {
-		// DÜZELTME: verify_ajax() yerine WordPress'in yerleşik güvenlik kontrollerini kullanıyoruz.
-		check_ajax_referer( 'hbt_tpt_nonce', 'nonce' );
-		if ( ! current_user_can( 'manage_options' ) ) {
-			wp_send_json_error( array( 'message' => 'Yetkisiz erişim.' ) );
-		}
-		
-		try {
-			// Zaten Cron_Manager sınıfında olduğumuz için direkt $this ile fonksiyonu çağırıyoruz.
-			$this->sync_orders_fast();
-			wp_send_json_success( array( 'message' => __( 'Cron (Hızlı Tarama) kuyruğa eklendi.', 'hbt-trendyol-profit-tracker' ) ) );
-		} catch ( Throwable $e ) {
-			$error_msg = 'Kritik PHP Hatası: ' . $e->getMessage() . ' (Satır: ' . $e->getLine() . ')';
-			wp_send_json_error( array( 'message' => $error_msg ) );
-		}
 	}
 }
 // Arka plan (Plesk/Cron) isteklerinde de işçinin (worker) uyanık kalmasını sağlar.
