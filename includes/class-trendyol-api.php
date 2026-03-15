@@ -230,53 +230,56 @@ class HBT_Trendyol_API {
 	}
 
 	/**
-	 * Get settlements endpoint (recommended for commission fields).
-	 *
-	 * @param int               $start_ms Start ms.
-	 * @param int               $end_ms   End ms.
-	 * @param string|array|null $types    transactionTypes or single type.
-	 * @param int               $page
-	 * @param int               $size
-	 * @return array|WP_Error
-	 */
-	public function get_settlements( int $start_ms, int $end_ms, $types = null, int $page = 0, int $size = 500 ) {
-		$params = array(
-			'startDate' => $start_ms,
-			'endDate'   => $end_ms,
-			'page'      => $page,
-			'size'      => $size,
-		);
+     * Get settlements endpoint (recommended for commission fields).
+     *
+     * @param int               $start_ms Start ms.
+     * @param int               $end_ms   End ms.
+     * @param string|array|null $types    transactionTypes or single type.
+     * @param int               $page
+     * @param int               $size
+     * @return array|WP_Error
+     */
+    public function get_settlements( int $start_ms, int $end_ms, $types = 'Sale,Return', int $page = 0, int $size = 500 ) {
+        $params = array(
+            'startDate' => $start_ms,
+            'endDate'   => $end_ms,
+            'page'      => $page,
+            'size'      => $size,
+        );
 
-		if ( ! empty( $types ) ) {
-			if ( is_array( $types ) ) {
-				$params['transactionTypes'] = implode( ',', $types );
-			} else {
-				$params['transactionTypes'] = (string) $types;
-			}
-		}
+        // KRİTİK DÜZELTME: Eğer arka plan görevleri türü boş gönderirse, zorunlu olarak Sale ve Return ata.
+        if ( empty( $types ) ) {
+            $types = 'Sale,Return';
+        }
 
-		$endpoint = "integration/finance/che/sellers/{$this->supplier_id}/settlements?" . http_build_query( $params );
-		$response = $this->make_request( $endpoint );
+        if ( is_array( $types ) ) {
+            $params['transactionTypes'] = implode( ',', $types );
+        } else {
+            $params['transactionTypes'] = (string) $types;
+        }
 
-		if ( is_wp_error( $response ) ) {
-			return $response;
-		}
+        $endpoint = "integration/finance/che/sellers/{$this->supplier_id}/settlements?" . http_build_query( $params );
+        $response = $this->make_request( $endpoint );
 
-		$all = $response['content'] ?? array();
-		$total_pages = $response['totalPages'] ?? 1;
+        if ( is_wp_error( $response ) ) {
+            return $response;
+        }
 
-		for ( $p = 1; $p < $total_pages; $p++ ) {
-			$params['page'] = $p;
-			$endpoint = "integration/finance/che/sellers/{$this->supplier_id}/settlements?" . http_build_query( $params );
-			$page_response = $this->make_request( $endpoint );
-			if ( is_wp_error( $page_response ) ) {
-				break;
-			}
-			$all = array_merge( $all, $page_response['content'] ?? array() );
-		}
+        $all = $response['content'] ?? array();
+        $total_pages = $response['totalPages'] ?? 1;
 
-		return $all;
-	}
+        for ( $p = 1; $p < $total_pages; $p++ ) {
+            $params['page'] = $p;
+            $endpoint = "integration/finance/che/sellers/{$this->supplier_id}/settlements?" . http_build_query( $params );
+            $page_response = $this->make_request( $endpoint );
+            if ( is_wp_error( $page_response ) ) {
+                break;
+            }
+            $all = array_merge( $all, $page_response['content'] ?? array() );
+        }
+
+        return $all;
+    }
 
 	// -------------------------------------------------------------------------
 	// HTTP helpers
@@ -295,7 +298,12 @@ class HBT_Trendyol_API {
 	 * @return array|WP_Error   Parsed JSON array or WP_Error.
 	 */
 	public function make_request( string $endpoint, array $params = array() ) {
-		$url = self::BASE_URL . $endpoint;
+		// Finans uç noktaları "apigw.trendyol.com" sunucusunu kullanır!
+if ( strpos( $endpoint, 'integration/finance' ) === 0 ) {
+    $url = 'https://apigw.trendyol.com/' . $endpoint;
+} else {
+    $url = self::BASE_URL . $endpoint;
+}
 
 		$max_attempts = 3;
 		$attempt = 0;
@@ -308,7 +316,7 @@ class HBT_Trendyol_API {
 				'timeout' => 30,
 				'headers' => array(
 					'Authorization' => 'Basic ' . $this->credentials,
-					'User-Agent'    => $this->supplier_id . ' - SelfIntegration',
+					'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
 					'Content-Type'  => 'application/json',
 				),
 			);

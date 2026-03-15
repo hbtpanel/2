@@ -106,12 +106,6 @@ $queue_count = is_array($queue) ? count($queue) : 0;
                         <input type="number" id="cron_product_interval" name="cron_product_interval" min="60" style="width: 100%; padding: 10px 12px; border-radius: var(--hbt-radius-sm); border: 1px solid var(--hbt-border);" value="<?php echo esc_attr( (string) $values['cron_product_interval'] ); ?>">
                     </div>
                 </div>
-                <div style="margin-top: 20px; border-top: 1px solid var(--hbt-border); padding-top: 15px;">
-                    <label style="font-weight: 600; color: var(--hbt-primary); display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                        <input type="checkbox" id="enable_archive_sync" name="enable_archive_sync" value="1" <?php checked( isset($values['enable_archive_sync']) ? (bool) $values['enable_archive_sync'] : false ); ?>>
-                        <?php esc_html_e( 'Arşiv Taramasını Aktifleştir (Geç iadeler ve geç komisyon faturaları için 14-28 gün aralığını günde 1 kez tarar)', 'hbt-trendyol-profit-tracker' ); ?>
-                    </label>
-                </div>
 
                 <div style="margin-top: 24px; border: 1px solid #93C5FD; background: #EFF6FF; padding: 20px; border-radius: var(--hbt-radius);">
                     <h3 style="margin: 0 0 12px 0; color: #1E3A8A; font-size: 15px; display: flex; align-items: center; gap: 8px;">
@@ -158,9 +152,8 @@ $queue_count = is_array($queue) ? count($queue) : 0;
                                 <?php foreach ( $sync_logs as $log ) : 
                                     // Rozet Renkleri
                                     $badge_bg = '#E2E8F0'; $badge_color = '#475569'; $type_label = $log->sync_type;
-                                 if ($log->sync_type === 'auto_fast') { $badge_bg = '#DBEAFE'; $badge_color = '#1D4ED8'; $type_label = 'Otomatik (Hızlı)'; }
+                                    if ($log->sync_type === 'auto_fast') { $badge_bg = '#DBEAFE'; $badge_color = '#1D4ED8'; $type_label = 'Otomatik (Hızlı)'; }
                                     elseif ($log->sync_type === 'auto_deep') { $badge_bg = '#EDE9FE'; $badge_color = '#6D28D9'; $type_label = 'Otomatik (Derin)'; }
-                                    elseif ($log->sync_type === 'auto_archive') { $badge_bg = '#FCE7F3'; $badge_color = '#BE185D'; $type_label = 'Otomatik (Arşiv)'; }
                                     elseif ($log->sync_type === 'manual') { $badge_bg = '#FEF3C7'; $badge_color = '#B45309'; $type_label = 'Manuel (Buton)'; }
 
                                     $status_color = $log->status === 'success' ? 'var(--hbt-success)' : 'var(--hbt-danger)';
@@ -382,7 +375,7 @@ $queue_count = is_array($queue) ? count($queue) : 0;
                             </thead>
                             <tbody>
                                 <?php
-                                $cron_hooks = array( 'hbt_sync_orders_fast', 'hbt_sync_orders_deep', 'hbt_sync_orders_archive', 'hbt_process_background_queue', 'hbt_sync_currency', 'hbt_sync_financials', 'hbt_run_calculations', 'hbt_check_returns', 'hbt_sync_products' );
+                                $cron_hooks = array( 'hbt_sync_orders_fast', 'hbt_sync_orders_deep', 'hbt_process_background_queue', 'hbt_sync_currency', 'hbt_sync_financials', 'hbt_run_calculations', 'hbt_check_returns', 'hbt_sync_products' );
                                 foreach ( $cron_hooks as $hook ) :
                                     $ts = wp_next_scheduled( $hook );
                                 ?>
@@ -537,7 +530,7 @@ jQuery(document).ready(function($) {
                     $('#hbt-monitor-active').show();
                     
                     let sName = data.active_job.store_name || 'Bilinmeyen Mağaza';
-                   let typeLabel = data.active_job.sync_type === 'auto_fast' ? 'Hızlı Tarama' : (data.active_job.sync_type === 'auto_deep' ? 'Derin Tarama' : (data.active_job.sync_type === 'auto_archive' ? 'Arşiv Tarama' : 'Manuel'));
+                    let typeLabel = data.active_job.sync_type === 'auto_fast' ? 'Hızlı Tarama' : (data.active_job.sync_type === 'auto_deep' ? 'Derin Tarama' : 'Manuel');
                     
                     $('#mon-store-name').text(sName);
                     $('#mon-sync-type').text(typeLabel);

@@ -1254,9 +1254,6 @@ public function ajax_bulk_import_costs(): void {
 		if ( ! isset( $post_data['notification_cost_missing'] ) ) {
 			$post_data['notification_cost_missing'] = 0;
 		}
-		if ( ! isset( $post_data['enable_archive_sync'] ) ) {
-			$post_data['enable_archive_sync'] = 0;
-		}
 
 		if ( $settings->save_from_post( $post_data ) ) {
 			wp_send_json_success( array( 'message' => __( 'Ayarlar kaydedildi.', 'hbt-trendyol-profit-tracker' ) ) );

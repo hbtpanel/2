@@ -37,7 +37,6 @@ class HBT_Cron_Manager {
 	private array $events = array(
 		'hbt_sync_orders_fast'       => 'hbt_every_5_min', 
 		'hbt_sync_orders_deep'       => 'twicedaily', // Derin Döngü günde 2 kez çalışacak
-		'hbt_sync_orders_archive'    => 'daily', // Arşiv Döngüsü günde 1 kez çalışacak
 		'hbt_sync_currency'          => 'hourly',
 		'hbt_sync_financials'        => 'hbt_every_6_hours',
 		'hbt_run_calculations'       => 'hourly',
@@ -76,7 +75,6 @@ class HBT_Cron_Manager {
 		// Register cron callbacks (YENİ SİSTEM).
 		add_action( 'hbt_sync_orders_fast', array( $this, 'sync_orders_fast' ) );
 		add_action( 'hbt_sync_orders_deep', array( $this, 'sync_orders_deep' ) );
-		add_action( 'hbt_sync_orders_archive', array( $this, 'sync_orders_archive' ) );
 		add_action( 'hbt_sync_currency', array( $this, 'sync_currency_rates' ) );
 		add_action( 'hbt_sync_financials', array( $this, 'sync_financial_data' ) );
 		add_action( 'hbt_run_calculations', array( $this, 'run_calculations' ) );
@@ -228,8 +226,8 @@ class HBT_Cron_Manager {
 		usort( $queue, function( $a, $b ) {
 			// 'auto_fast' (Hızlı Tarama) ve 'manual' (Kullanıcı tetiklemesi) işlemlere 1. Öncelik ver.
 			// 'auto_deep' (Derin Tarama) ve diğerlerine 2. Öncelik ver.
-            $priority_a = ( isset($a['sync_type']) && in_array($a['sync_type'], array('auto_fast', 'manual')) ) ? 1 : ( (isset($a['sync_type']) && $a['sync_type'] === 'auto_deep') ? 2 : 3 );
-            $priority_b = ( isset($b['sync_type']) && in_array($b['sync_type'], array('auto_fast', 'manual')) ) ? 1 : ( (isset($b['sync_type']) && $b['sync_type'] === 'auto_deep') ? 2 : 3 );
+			$priority_a = ( isset($a['sync_type']) && in_array($a['sync_type'], array('auto_fast', 'manual')) ) ? 1 : 2;
+			$priority_b = ( isset($b['sync_type']) && in_array($b['sync_type'], array('auto_fast', 'manual')) ) ? 1 : 2;
 			
 			// Eğer her iki işin önceliği aynıysa (örneğin ikisi de derin taramaysa veya ikisi de hızlıysa),
 			// kuyruğa ilk giren ilk çıksın (FIFO mantığını koru).
@@ -318,7 +316,7 @@ class HBT_Cron_Manager {
 					$queue[] = $job;
 				} else {
 					// İŞ TAMAMLANDI: Süreyi ve detaylı raporu hesapla
-					$s_type_label = $sync_type === 'auto_fast' ? 'Hızlı Tarama' : ($sync_type === 'auto_deep' ? 'Derin Tarama' : ($sync_type === 'auto_archive' ? 'Arşiv Tarama' : 'Manuel Tarama'));
+					$s_type_label = $sync_type === 'auto_fast' ? 'Hızlı Tarama' : ($sync_type === 'auto_deep' ? 'Derin Tarama' : 'Manuel Tarama');
 					$time_taken   = max(1, current_time('timestamp') - strtotime($job['created_at']));
 					$time_str     = $time_taken >= 60 ? floor($time_taken / 60) . ' dk ' . ($time_taken % 60) . ' sn' : $time_taken . ' saniye';
 					
@@ -384,36 +382,9 @@ class HBT_Cron_Manager {
 		$start_date = $dt->format('Y-m-d\TH:i:s');
 		
 		foreach ( $stores as $store ) {
-			$this->enqueue_store_sync( $store, $start_date, $end_date, 0, 200, 'auto_deep' );
+			$this->enqueue_store_sync( $store, $start_date, $end_date, 0, 100, 'auto_deep' );
 		}
 	}
-
-	/**
-     * Arşiv Döngüsü: 14 günden eski, 28 günden yeni siparişleri tarar (Geç iadeler ve faturalar için)
-     */
-   public function sync_orders_archive(): void {
-        // YENİ ÇAĞIRMA ŞEKLİ:
-        $is_enabled = (int) get_option( 'hbt_tpt_enable_archive_sync', 0 );
-        
-        if ( ! $is_enabled ) {
-            return;
-        }
-
-        $stores = $this->db->get_stores( true );
-        $tz = new DateTimeZone('Europe/Istanbul');
-        
-        $dt_end = new DateTime('now', $tz);
-        $dt_end->modify('-14 days');
-        $end_date = $dt_end->format('Y-m-d\TH:i:s');
-        
-        $dt_start = new DateTime('now', $tz);
-        $dt_start->modify('-28 days');
-        $start_date = $dt_start->format('Y-m-d\TH:i:s');
-        
-        foreach ( $stores as $store ) {
-            $this->enqueue_store_sync( $store, $start_date, $end_date, 0, 200, 'auto_archive' );
-        }
-    }
 
 	/**
 	 * Sizin orijinal, hatasız sipariş çekme kodunuz (HİÇ DOKUNULMADI)
